@@ -1,12 +1,14 @@
 # -*- coding: utf-8 -*-
 
 import socket
-import sys
 import threading
+import os 
+import uuid
+import time
  
-conn = threading.Condition()
-HOST = raw_input("Input the server's ip adrress: ") # Symbolic name meaning all available interfaces
-PORT = 8888 # Arbitrary non-privileged port
+CON = threading.Condition()
+HOST = "localhost"
+PORT = 8888
 data = ""
 user_nickname_list = []
  
@@ -15,18 +17,31 @@ print 'Socket created.'
 s.bind((HOST, PORT))
 s.listen(10)
 print 'Socket now listening...'
- 
-#Function for handling connections. This will be used to create threads
-def clientThreadIn(conn, nick):
-    global data
+    
+def clientThreadIn(connect, nick):
+    global data, file_counter
     while True:
         try:
-            temp = conn.recv(1024)
+            temp = connect.recv(1024)
             if not temp:
-                conn.close()
+                connect.close()
                 return
-            NotifyAll(temp)
-            print data
+            if(temp[0:10] == "send_file "):
+                output_file = str(uuid.uuid4()) + "_" + temp[temp.rindex("/")+1:temp.rindex(";")]
+                filesize = long(temp[temp.rindex(";")+1:])
+                print output_file + ", size:" + str(filesize)
+                temp = connect.recv(1024)
+                with open(output_file, "wb") as w:
+                    while not ("EOF" in temp):
+                        w.write(temp)
+                        temp = connect.recv(1024)
+                w.close()
+                NotifyAll("Successfully upload file "+ output_file + " to server")
+                print "Successfully upload file "+ output_file + " to server"
+                
+            else:
+                NotifyAll(temp)
+                print data
         except:
             NotifyAll(nick + " leaves the room!")
             print data
@@ -36,22 +51,22 @@ def clientThreadIn(conn, nick):
  
 def NotifyAll(sss):
     global data
-    if conn.acquire():
+    if CON.acquire():
         data = sss
-        conn.notifyAll()
-        conn.release()
+        CON.notifyAll()
+        CON.release()
   
-def ClientThreadOut(conn, nick):
+def ClientThreadOut(connect, nick):
     global data
     while True:
-        if conn.acquire():
-            conn.wait()
+        if CON.acquire():
+            CON.wait()
             if data:
                 try:
-                    conn.send(data)
-                    conn.release()
+                    connect.send(data)
+                    CON.release()
                 except:
-                    conn.release()
+                    CON.release()
                     return
                 
 def check_legal(nickname):
@@ -60,19 +75,18 @@ def check_legal(nickname):
         return False, "This name has existed."
     else:
         user_nickname_list.append(nickname)
-        return True, "Successfully login."                     
+        return True, "Successfully login."
  
-while 1:
-    conn, addr = s.accept()
+while True:
+    connect, addr = s.accept()
     print 'Connected with ' + addr[0] + ':' + str(addr[1])
-    nick = conn.recv(4096)
+    nick = connect.recv(1024)
     is_legal, msg = check_legal(nick)
-    conn.send(msg)
+    connect.send(msg)
     if is_legal:
-        NotifyAll('Welcome ' + nick + ' to the room! There are ' + str((threading.activeCount() + 1) / 2) + ' member(s) online!\n')
+        NotifyAll('Welcome ' + nick + ' to the room! There are ' + str((threading.activeCount() + 1) / 2) + ' member(s) online!')
         print data
-#         print str((threading.activeCount() + 1) / 2) + ' person(s)!'
-        conn.send(data)
-        threading.Thread(target = clientThreadIn , args = (conn, nick)).start()
-        threading.Thread(target = ClientThreadOut , args = (conn, nick)).start() 
+        connect.send(data)
+        threading.Thread(target = clientThreadIn , args = (connect, nick)).start()
+        threading.Thread(target = ClientThreadOut , args = (connect, nick)).start() 
 s.close()
